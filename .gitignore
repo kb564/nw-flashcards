@@ -1,0 +1,21 @@
+node_modules/
+dist/
+coverage/
+*.nwdeck
+*.nwbackup
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# 原本・生成カード・PDFは公開アプリのリポジトリへ入れない。
+cards/
+tmp/
+*.yaml
+*.yml
+!.github/dependabot.yml
+*.pdf
+*.png
+!public/icons/*.png
+!docs/icons/*.png

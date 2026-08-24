@@ -1,0 +1,29 @@
+{
+  "name": "nw-flashcards",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "prebuild": "node scripts/generate-icons.mjs",
+    "build": "tsc --noEmit && vite build && node scripts/build-service-worker.mjs && node scripts/security-gate.mjs",
+    "preview": "vite preview --host 127.0.0.1",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "audit": "npm audit --omit=dev --audit-level=high",
+    "deck:create": "node scripts/create-deck.mjs",
+    "deck:check": "node scripts/create-deck.mjs --check",
+    "verify": "npm test && npm run build && npm run audit",
+    "pages:prepare": "npm run verify && node scripts/prepare-pages.mjs"
+  },
+  "dependencies": {
+    "ts-fsrs": "5.4.1"
+  },
+  "devDependencies": {
+    "@types/node": "26.2.0",
+    "fake-indexeddb": "6.2.5",
+    "typescript": "7.0.2",
+    "vite": "8.2.2",
+    "vitest": "4.1.11"
+  }
+}
