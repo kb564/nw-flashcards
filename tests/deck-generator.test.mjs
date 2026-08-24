@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 describe("local deck generator", () => {
@@ -15,4 +16,10 @@ describe("local deck generator", () => {
       "result: OK",
     ]);
   }, 65_000);
+
+  it("does not disable custom deck files in the iOS file picker", () => {
+    const source = readFileSync("src/app.ts", "utf8");
+    expect(source).not.toContain("input.accept");
+    expect(source).toContain('input.type = "file"');
+  });
 });

@@ -180,7 +180,9 @@ function importLauncher(label: string, mode: ImportMode): HTMLButtonElement {
     const input = document.createElement("input");
     input.type = "file";
     input.hidden = true;
-    input.accept = mode === "deck" ? ".nwdeck,application/json" : ".nwbackup,application/json";
+    // iOS Filesは独自拡張子をacceptで絞ると選択不能にすることがある。
+    // ファイル種別は選択後にサイズ、拡張用途、厳格スキーマ、AEAD認証で検証する。
+    input.setAttribute("aria-label", mode === "deck" ? "暗号化デッキファイル" : "暗号化バックアップファイル");
     input.addEventListener("change", () => {
       const file = input.files?.item(0);
       input.remove();
