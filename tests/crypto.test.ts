@@ -29,9 +29,9 @@ describe("encrypted envelope", () => {
     expect(() => parseEnvelopeText(JSON.stringify({ ...envelope, extra: true }), "nwdeck")).toThrow("形式");
   }, 20_000);
 
-  it("enforces a long passphrase", () => {
-    expect(() => validatePassphrase("short password")).toThrow("20文字");
-    expect(() => validatePassphrase("one two three four five")).not.toThrow();
-    expect(() => validatePassphrase("01234567890123456789")).not.toThrow();
+  it("enforces the shorter passphrase floor", () => {
+    expect(() => validatePassphrase("12345678901")).toThrow("12文字");
+    expect(() => validatePassphrase("one two three four")).not.toThrow();
+    expect(() => validatePassphrase("123456789012")).not.toThrow();
   });
 });

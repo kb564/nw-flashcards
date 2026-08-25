@@ -50,8 +50,8 @@ function aadFor(envelope: Omit<EncryptedEnvelope, "ciphertext">): Uint8Array<Arr
 export function validatePassphrase(passphrase: string): void {
   const normalized = passphrase.normalize("NFKC");
   const wordCount = normalized.trim().split(/\s+/u).filter(Boolean).length;
-  if (normalized.length < 20 && wordCount < 5) {
-    throw new Error("パスフレーズは20文字以上、または空白区切りの5単語以上にしてください。");
+  if (normalized.length < 12 && wordCount < 4) {
+    throw new Error("パスフレーズは12文字以上、または空白区切りの4単語以上にしてください。");
   }
   if (normalized.length > 256) {
     throw new Error("パスフレーズは256文字以内にしてください。");

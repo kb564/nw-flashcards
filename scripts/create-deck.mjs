@@ -18,7 +18,7 @@ function base64(bytes) {
 function validatePassphrase(passphrase) {
   const normalized = passphrase.normalize("NFKC");
   const words = normalized.trim().split(/\s+/u).filter(Boolean).length;
-  if (normalized.length < 20 && words < 5) throw new Error("20文字以上、または空白区切りの5単語以上が必要です。");
+  if (normalized.length < 12 && words < 4) throw new Error("12文字以上、または空白区切りの4単語以上が必要です。");
   if (normalized.length > 256) throw new Error("256文字以内にしてください。");
 }
 

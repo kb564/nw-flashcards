@@ -32,7 +32,6 @@ import { assertDeckPayload, assertVaultPayload } from "./validation";
 type Route = "home" | "study" | "browse" | "settings";
 type ImportMode = "deck" | "backup";
 
-const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 function requireRoot(): HTMLDivElement {
   const node = document.querySelector<HTMLDivElement>("#app");
   if (!node) throw new Error("アプリの表示領域が見つかりません。");
@@ -48,8 +47,6 @@ let route: Route = "home";
 let studyQueue: StudyCard[] = [];
 let studyIndex = 0;
 let answerVisible = false;
-let idleTimer: number | undefined;
-let hiddenAt: number | null = null;
 let busy = false;
 
 function element<K extends keyof HTMLElementTagNameMap>(
@@ -84,20 +81,12 @@ function safeError(error: unknown): string {
   return error instanceof Error ? error.message : "処理を完了できませんでした。";
 }
 
-function resetIdleTimer(): void {
-  if (!vault) return;
-  if (idleTimer !== undefined) window.clearTimeout(idleTimer);
-  idleTimer = window.setTimeout(() => lockApp("5分間操作がなかったためロックしました。"), IDLE_TIMEOUT_MS);
-}
-
 function lockApp(message?: string): void {
   vault = null;
   sessionMaterial = null;
   studyQueue = [];
   studyIndex = 0;
   answerVisible = false;
-  if (idleTimer !== undefined) window.clearTimeout(idleTimer);
-  idleTimer = undefined;
   renderLocked(message);
 }
 
@@ -236,7 +225,6 @@ async function unlockStoredVault(input: HTMLInputElement, panel: HTMLElement): P
     vault = payload;
     sessionMaterial = material;
     route = "home";
-    resetIdleTimer();
     renderApp();
   } catch (error) {
     input.value = "";
@@ -288,7 +276,6 @@ async function importEncryptedFile(
       sessionMaterial = importMaterial;
     }
     route = "home";
-    resetIdleTimer();
     renderApp(announce(mode === "deck" ? "デッキを安全に取り込みました。" : "バックアップを復元しました。", "success"));
   } catch (error) {
     input.value = "";
@@ -530,7 +517,6 @@ async function rateCurrentCard(cardId: string, grade: Grade, choice: HTMLButtonE
     storedEnvelope = nextEnvelope;
     studyIndex += 1;
     answerVisible = false;
-    resetIdleTimer();
     renderApp();
   } catch (error) {
     renderApp(announce(safeError(error), "error"));
@@ -633,11 +619,18 @@ function renderSettings(): HTMLElement {
   data.append(backup, update, restore);
   section.append(data);
 
-  const password = settingsCard("パスフレーズ変更", "変更後、古いパスフレーズで作成したバックアップは古いままです。");
+  const password = settingsCard("パスフレーズ変更", "12文字以上または4単語以上。変更後も古いバックアップのパスフレーズは変わりません。");
   const change = button("新しいパスフレーズを設定", "button button-secondary button-wide");
   change.addEventListener("click", () => renderPassphraseChange());
   password.append(change);
   section.append(password);
+
+  section.append(
+    settingsCard(
+      "ロック動作",
+      "無操作やバックグラウンド経過では自動ロックしません。必要なときは画面上部の「ロック」を押してください。アプリを再起動すると再認証が必要です。",
+    ),
+  );
 
   const danger = settingsCard("端末内データの削除", "元に戻せません。復元確認済みのバックアップを2世代残してから実行してください。", "danger-card");
   const remove = button("端末内データを削除", "button button-danger button-wide");
@@ -700,7 +693,11 @@ function renderPassphraseChange(): void {
   const shell = element("main", "lock-shell");
   shell.append(renderBrand());
   const panel = element("section", "lock-panel");
-  panel.append(element("p", "kicker", "RE-ENCRYPT"), element("h2", "lock-title", "新しいパスフレーズ"));
+  panel.append(
+    element("p", "kicker", "RE-ENCRYPT"),
+    element("h2", "lock-title", "新しいパスフレーズ"),
+    element("p", "muted", "12文字以上、または空白区切りの4単語以上。短いほど推測されやすくなります。"),
+  );
   const form = element("form", "stack");
   const first = passwordInput("新しいパスフレーズ", "new-password");
   const second = passwordInput("もう一度入力", "new-password");
@@ -731,7 +728,6 @@ async function changePassphrase(first: HTMLInputElement, second: HTMLInputElemen
     await saveVaultEnvelope(envelope);
     storedEnvelope = envelope;
     sessionMaterial = material;
-    resetIdleTimer();
     renderApp(announce("パスフレーズを変更しました。新しいバックアップを2世代作成してください。", "success"));
   } catch (error) {
     first.value = "";
@@ -776,14 +772,6 @@ async function confirmDelete(input: HTMLInputElement, panel: HTMLElement): Promi
 export async function initializeApp(): Promise<void> {
   storedEnvelope = await loadVaultEnvelope();
   renderLocked();
-  ["pointerdown", "keydown", "touchstart"].forEach((name) =>
-    window.addEventListener(name, resetIdleTimer, { passive: true }),
-  );
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") hiddenAt = Date.now();
-    else if (hiddenAt !== null && Date.now() - hiddenAt >= IDLE_TIMEOUT_MS) lockApp("バックグラウンド経過のためロックしました。");
-    hiddenAt = null;
-  });
   window.addEventListener("pagehide", () => {
     vault = null;
     sessionMaterial = null;

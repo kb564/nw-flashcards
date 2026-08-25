@@ -22,4 +22,12 @@ describe("local deck generator", () => {
     expect(source).not.toContain("input.accept");
     expect(source).toContain('input.type = "file"');
   });
+
+  it("does not include inactivity or background timeout locking", () => {
+    const source = readFileSync("src/app.ts", "utf8");
+    expect(source).not.toContain("IDLE_TIMEOUT_MS");
+    expect(source).not.toContain("resetIdleTimer");
+    expect(source).not.toContain('addEventListener("visibilitychange"');
+    expect(source).toContain('lock.addEventListener("click"');
+  });
 });
