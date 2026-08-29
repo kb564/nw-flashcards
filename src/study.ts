@@ -38,14 +38,49 @@ function introducedToday(review: ReviewState, now: Date): boolean {
 export function getStudyCounts(vault: VaultPayload, now: Date): StudyCounts {
   const learned = Object.keys(vault.reviews).length;
   const due = Object.values(vault.reviews).filter((review) => new Date(review.card.due) <= now).length;
-  const introduced = Object.values(vault.reviews).filter((review) => introducedToday(review, now)).length;
-  const unseen = vault.deck.cards.length - learned;
   return {
     due,
-    newAvailable: Math.min(Math.max(vault.settings.newCardsPerDay - introduced, 0), unseen),
+    newAvailable: selectNewCards(vault, now).length,
     learned,
     total: vault.deck.cards.length,
   };
+}
+
+function selectNewCards(vault: VaultPayload, now: Date): StudyCard[] {
+  const cardsById = new Map(vault.deck.cards.map((card) => [card.id, card]));
+  const introduced = Object.entries(vault.reviews)
+    .filter(([, review]) => introducedToday(review, now))
+    .map(([id]) => cardsById.get(id))
+    .filter((card): card is StudyCard => card !== undefined);
+  const limit = Math.max(vault.settings.newCardsPerDay - introduced.length, 0);
+  if (limit === 0) return [];
+  const dailyCatchupTarget = Math.round(vault.settings.newCardsPerDay * 0.2);
+  const dailyTextbookTarget = vault.settings.newCardsPerDay - dailyCatchupTarget;
+  const introducedTextbook = introduced.filter((card) => card.collectionId === "textbook-r06").length;
+  const introducedCatchup = introduced.filter((card) => card.collectionId === "catchup").length;
+  const unseen = vault.deck.cards.filter((card) => vault.reviews[card.id] === undefined).sort((a, b) => a.order - b.order);
+  const selected: StudyCard[] = [];
+  const selectedIds = new Set<string>();
+  const eligible = (card: StudyCard) => card.collectionId === "textbook-r06" ||
+    (card.primaryRelatedCardId !== undefined && (vault.reviews[card.primaryRelatedCardId] !== undefined || selectedIds.has(card.primaryRelatedCardId)));
+  const take = (collectionId: StudyCard["collectionId"], count: number) => {
+    for (const card of unseen) {
+      if (count <= 0 || selected.length >= limit) break;
+      if (selectedIds.has(card.id) || card.collectionId !== collectionId || !eligible(card)) continue;
+      selected.push(card);
+      selectedIds.add(card.id);
+      count -= 1;
+    }
+  };
+  take("textbook-r06", Math.max(dailyTextbookTarget - introducedTextbook, 0));
+  take("catchup", Math.max(dailyCatchupTarget - introducedCatchup, 0));
+  while (selected.length < limit) {
+    const fallback = unseen.find((card) => !selectedIds.has(card.id) && eligible(card));
+    if (!fallback) break;
+    selected.push(fallback);
+    selectedIds.add(fallback.id);
+  }
+  return selected;
 }
 
 export function buildStudyQueue(vault: VaultPayload, now: Date): StudyCard[] {
@@ -60,12 +95,7 @@ export function buildStudyQueue(vault: VaultPayload, now: Date): StudyCard[] {
     .map(([id]) => cardsById.get(id))
     .filter((card): card is StudyCard => card !== undefined);
 
-  const counts = getStudyCounts(vault, now);
-  const unseen = vault.deck.cards
-    .filter((card) => vault.reviews[card.id] === undefined)
-    .sort((left, right) => left.order - right.order)
-    .slice(0, counts.newAvailable);
-  return [...due, ...unseen];
+  return [...due, ...selectNewCards(vault, now)];
 }
 
 function cardForReview(review: ReviewState | undefined, now: Date): FsrsCard {
@@ -117,28 +147,39 @@ export function formatInterval(due: Date, now: Date): string {
 
 export function filterCards(vault: VaultPayload, filters: CardFilters, now: Date): StudyCard[] {
   const query = filters.query.normalize("NFKC").toLocaleLowerCase("ja").trim();
-  return vault.deck.cards.filter((card) => {
+  const passesNonQuery = (card: StudyCard) => {
     if (filters.chapter !== "all" && card.chapter !== filters.chapter) return false;
+    if (filters.collection !== "all" && card.collectionId !== filters.collection) return false;
     if (filters.importance !== "all" && card.importance !== filters.importance) return false;
     if (filters.kind !== "all" && card.kind !== filters.kind) return false;
     const review = vault.reviews[card.id];
     if (filters.state === "new" && review !== undefined) return false;
     if (filters.state === "learned" && review === undefined) return false;
     if (filters.state === "due" && (review === undefined || new Date(review.card.due) > now)) return false;
+    return true;
+  };
+  const matchesQuery = (card: StudyCard) => {
     if (!query) return true;
     const searchable = [
-      card.term,
-      card.prompt,
-      card.chapterTitle,
-      card.page,
-      card.exam ?? "",
+      card.term, card.prompt, card.chapterTitle, card.page, card.sourceLabel, card.sourceLocator, card.exam ?? "",
       ...card.answerSections.flatMap((section) => [section.label, section.text]),
     ]
       .join("\n")
       .normalize("NFKC")
       .toLocaleLowerCase("ja");
     return searchable.includes(query);
-  });
+  };
+  const direct = vault.deck.cards.filter((card) => passesNonQuery(card) && matchesQuery(card));
+  if (!query) return direct;
+  const ids = new Set(direct.map((card) => card.id));
+  const cardsById = new Map(vault.deck.cards.map((card) => [card.id, card]));
+  for (const card of direct) {
+    for (const id of card.relatedCardIds) {
+      const related = cardsById.get(id);
+      if (related && passesNonQuery(related)) ids.add(id);
+    }
+  }
+  return vault.deck.cards.filter((card) => ids.has(card.id));
 }
 
 export function mergeDeck(vault: VaultPayload, deck: VaultPayload["deck"]): VaultPayload {

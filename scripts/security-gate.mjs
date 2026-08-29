@@ -4,7 +4,9 @@ import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const dist = resolve(root, "dist");
+const targetName = process.argv[2] ?? "dist";
+if (!new Set(["dist", "docs"]).has(targetName)) throw new Error("検査対象はdistまたはdocsだけです。");
+const dist = resolve(root, targetName);
 const forbiddenExtensions = [".yaml", ".yml", ".pdf", ".nwdeck", ".nwbackup", ".map"];
 const plaintextFingerprints = [
   { length: 13, sha256: "8e4b3e581a08df1a95233aba41d4bb8d003b7b33f7f901b08fd9a59c351b8873" },
@@ -60,4 +62,4 @@ if (errors.length > 0) {
   process.stderr.write(`security gate: FAILED (${errors.length})\n${errors.map((error) => `- ${error}`).join("\n")}\n`);
   process.exit(1);
 }
-process.stdout.write(`security gate: OK (${files.length} files)\n`);
+process.stdout.write(`security gate: OK (${targetName}, ${files.length} files)\n`);

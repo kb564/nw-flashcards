@@ -1,6 +1,6 @@
 "use strict";
-const CACHE_NAME = "nw-flashcards-f42429ce698f7a22";
-const PRECACHE = ["./assets/index-CbK210Bb.js","./assets/style-Bjos7jOH.css","./icons/icon-192.png","./icons/icon-512.png","./index.html","./manifest.webmanifest"];
+const CACHE_NAME = "nw-flashcards-2181ca08bdc6ad34";
+const PRECACHE = ["./assets/index-DQGFG2KH.js","./assets/style-S9eN5muI.css","./icons/icon-192.png","./icons/icon-512.png","./index.html","./manifest.webmanifest"];
 self.skipWaiting();
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE)));

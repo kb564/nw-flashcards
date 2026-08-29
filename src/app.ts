@@ -27,7 +27,7 @@ import {
   type StudyCard,
   type VaultPayload,
 } from "./types";
-import { assertDeckPayload, assertVaultPayload } from "./validation";
+import { normalizeDeckPayload, normalizeVaultPayload } from "./validation";
 
 type Route = "home" | "study" | "browse" | "settings";
 type ImportMode = "deck" | "backup";
@@ -48,6 +48,7 @@ let studyQueue: StudyCard[] = [];
 let studyIndex = 0;
 let answerVisible = false;
 let busy = false;
+let browseFocusId: string | null = null;
 
 function element<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -221,8 +222,7 @@ async function unlockStoredVault(input: HTMLInputElement, panel: HTMLElement): P
     const material = await importPassphrase(input.value);
     input.value = "";
     const payload = await decryptPayload<unknown>(storedEnvelope, material, "nwvault");
-    assertVaultPayload(payload);
-    vault = payload;
+    vault = normalizeVaultPayload(payload);
     sessionMaterial = material;
     route = "home";
     renderApp();
@@ -250,12 +250,12 @@ async function importEncryptedFile(
     input.value = "";
     if (mode === "deck") {
       const deck = await decryptPayload<unknown>(envelope, importMaterial, "nwdeck");
-      assertDeckPayload(deck);
+      const normalizedDeck = normalizeDeckPayload(deck);
       const nextVault: VaultPayload = vault
-        ? mergeDeck(vault, deck)
+        ? mergeDeck(vault, normalizedDeck)
         : {
-            schemaVersion: 1,
-            deck,
+            schemaVersion: 2,
+            deck: normalizedDeck,
             reviews: {},
             orphanReviews: {},
             settings: { newCardsPerDay: 10, requestRetention: 0.9, timezone: "Asia/Tokyo" },
@@ -268,11 +268,11 @@ async function importEncryptedFile(
       sessionMaterial = vaultMaterial;
     } else {
       const backup = await decryptPayload<unknown>(envelope, importMaterial, "nwbackup");
-      assertVaultPayload(backup);
-      const nextEnvelope = await encryptPayload("nwvault", backup, importMaterial);
+      const normalizedBackup = normalizeVaultPayload(backup);
+      const nextEnvelope = await encryptPayload("nwvault", normalizedBackup, importMaterial);
       await saveVaultEnvelope(nextEnvelope);
       storedEnvelope = nextEnvelope;
-      vault = backup;
+      vault = normalizedBackup;
       sessionMaterial = importMaterial;
     }
     route = "home";
@@ -347,7 +347,7 @@ function renderHome(): HTMLElement {
   heading.append(
     element("p", "eyebrow", "TODAY / ACTIVE RECALL"),
     element("h2", "page-title", "今日の想起を始める"),
-    element("p", "muted", "期限が来たカードを先に、新しいカードは教科書順に10枚まで。"),
+    element("p", "muted", "期限が来たカードを先に、新規は原則として教科書8枚・最新補足2枚。"),
   );
   section.append(heading);
 
@@ -450,7 +450,8 @@ function renderFlashcard(card: StudyCard): HTMLElement {
     element("span", "badge", card.kind),
     element("span", "badge", `第${card.chapter}章`),
   );
-  wrapper.append(badges, element("p", "card-page", `紙面 p.${card.page}`), element("h2", "card-term", card.term));
+  if (card.collectionId === "catchup") badges.append(element("span", "badge badge-catchup", "最新補足"));
+  wrapper.append(badges, element("p", "card-page", card.collectionId === "catchup" ? `${card.sourceLabel} • ${card.sourceLocator}` : `紙面 p.${card.page}`), element("h2", "card-term", card.term));
   const prompt = element("div", "card-prompt");
   prompt.append(element("p", "prompt-label", answerVisible ? "問い" : "頭の中で答える"));
   if (card.kind === "4問") {
@@ -484,7 +485,7 @@ function renderFlashcard(card: StudyCard): HTMLElement {
       answer.append(block);
     }
     if (card.exam) answer.append(element("p", "exam-note", `出題: ${card.exam}`));
-    wrapper.append(answer, renderRatingButtons(card.id));
+    wrapper.append(answer, renderRelatedCards(card), renderRatingButtons(card.id));
   }
   return wrapper;
 }
@@ -530,31 +531,46 @@ function renderBrowse(): HTMLElement {
   section.append(element("div", "page-heading"));
   const heading = section.firstElementChild!;
   heading.append(element("p", "eyebrow", "CARD BANK"), element("h2", "page-title", "カードを探す"));
-  const filters: CardFilters = { query: "", chapter: "all", importance: "all", kind: "all", state: "all" };
+  const filters: CardFilters = { query: "", chapter: "all", collection: "all", importance: "all", kind: "all", state: "all" };
   const controls = element("div", "filter-panel");
   const search = element("input", "field-input search-input");
   search.type = "search";
   search.placeholder = "用語・問い・答えを検索";
   search.setAttribute("aria-label", "カードを検索");
   const chapter = selectControl("filter-chapter", "すべての章", Array.from({ length: 9 }, (_, index) => [`${index + 1}`, `第${index + 1}章`]));
+  const collection = selectControl("filter-collection", "教科書＋最新補足", [["textbook-r06", "教科書"], ["catchup", "最新補足"]]);
   const importance = selectControl("filter-importance", "すべての重要度", IMPORTANCE_LEVELS.map((value) => [value, `重要度 ${value}`]));
   const kind = selectControl("filter-kind", "すべての種類", CARD_KINDS.map((value) => [value, value]));
   const state = selectControl("filter-state", "すべての状態", [["new", "未学習"], ["due", "復習待ち"], ["learned", "学習済み"]]);
-  controls.append(search, chapter, importance, kind, state);
+  controls.append(search, chapter, collection, importance, kind, state);
   const results = element("div", "card-results");
   const renderResults = () => {
     filters.query = search.value;
     filters.chapter = chapter.value === "all" ? "all" : Number(chapter.value);
+    filters.collection = collection.value as CardFilters["collection"];
     filters.importance = importance.value as CardFilters["importance"];
     filters.kind = kind.value as CardFilters["kind"];
     filters.state = state.value as CardFilters["state"];
     const cards = filterCards(vault!, filters, new Date());
     results.replaceChildren(element("p", "result-count", `${cards.length}枚`));
-    for (const card of cards.slice(0, 200)) results.append(renderBrowseCard(card));
+    const visible = cards.slice(0, 200);
+    if (browseFocusId) {
+      const focused = vault!.deck.cards.find((card) => card.id === browseFocusId);
+      if (focused && !visible.some((card) => card.id === focused.id)) visible.unshift(focused);
+    }
+    for (const card of visible) results.append(renderBrowseCard(card));
     if (cards.length > 200) results.append(announce("表示負荷を抑えるため先頭200枚を表示しています。検索条件を追加してください。"));
+    if (browseFocusId) {
+      const focused = results.querySelector<HTMLDetailsElement>(`[data-card-id="${browseFocusId}"]`);
+      if (focused) {
+        focused.open = true;
+        queueMicrotask(() => focused.scrollIntoView({ block: "center" }));
+      }
+      browseFocusId = null;
+    }
   };
   search.addEventListener("input", renderResults);
-  [chapter, importance, kind, state].forEach((control) => control.addEventListener("change", renderResults));
+  [chapter, collection, importance, kind, state].forEach((control) => control.addEventListener("change", renderResults));
   renderResults();
   section.append(controls, results);
   return section;
@@ -576,9 +592,13 @@ function selectControl(id: string, allLabel: string, options: ReadonlyArray<read
 
 function renderBrowseCard(card: StudyCard): HTMLElement {
   const details = element("details", "browse-card");
+  details.dataset.cardId = card.id;
   const summary = element("summary", "browse-summary");
   const title = element("span", "browse-title");
-  title.append(element("strong", "", card.term), element("small", "", `第${card.chapter}章 • p.${card.page} • ${card.kind}`));
+  title.append(
+    element("strong", "", card.term),
+    element("small", "", card.collectionId === "catchup" ? `最新補足 • ${card.sourceLocator} • 第${card.chapter}章` : `教科書 • 第${card.chapter}章 • p.${card.page} • ${card.kind}`),
+  );
   const status = vault!.reviews[card.id] ? "学習済" : "未学習";
   summary.append(title, element("span", `badge badge-${card.importance.toLowerCase()}`, `${card.importance} / ${status}`));
   const content = element("div", "browse-content");
@@ -588,8 +608,29 @@ function renderBrowseCard(card: StudyCard): HTMLElement {
     part.append(element("strong", "", answer.label), element("p", "", answer.text));
     content.append(part);
   }
+  content.append(renderRelatedCards(card));
   details.append(summary, content);
   return details;
+}
+
+function renderRelatedCards(card: StudyCard): HTMLElement {
+  const area = element("div", "related-cards");
+  if (card.relatedCardIds.length === 0) return area;
+  area.append(element("strong", "related-title", "関連カード"));
+  const byId = new Map(vault!.deck.cards.map((item) => [item.id, item]));
+  for (const id of card.relatedCardIds) {
+    const related = byId.get(id);
+    if (!related) continue;
+    const link = button(`${related.collectionId === "catchup" ? "最新補足" : "教科書"}: ${related.term}`, "button button-ghost button-small related-button");
+    link.addEventListener("click", (event) => {
+      event.stopPropagation();
+      browseFocusId = id;
+      route = "browse";
+      renderApp();
+    });
+    area.append(link);
+  }
+  return area;
 }
 
 function renderSettings(): HTMLElement {

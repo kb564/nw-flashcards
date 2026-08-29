@@ -89,7 +89,15 @@ async function encryptDeck(deck, passphrase) {
 async function main() {
   const deck = await buildDeckPayload(workspaceRoot);
   if (process.argv.includes("--check")) {
-    process.stdout.write(`source-notes: ${deck.sourceNoteCount}\nstudy-cards: ${deck.cardCount}\nchapters: ${deck.chapterCount}\nresult: OK\n`);
+    const textbook = deck.collections.find((item) => item.id === "textbook-r06");
+    const catchup = deck.collections.find((item) => item.id === "catchup");
+    process.stdout.write(
+      `textbook-notes: ${textbook?.sourceNoteCount}\n` +
+      `textbook-study-cards: ${textbook?.cardCount}\n` +
+      `supplemental-notes: ${catchup?.sourceNoteCount}\n` +
+      `supplemental-study-cards: ${catchup?.cardCount}\n` +
+      `study-cards: ${deck.cardCount}\nchapters: ${deck.chapterCount}\nresult: OK\n`,
+    );
     return;
   }
   const first = await hiddenPrompt("新しいパスフレーズ: ");

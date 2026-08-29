@@ -223,7 +223,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .badge-a { background: #e8f7f1; color: #087852; }
 .badge-b { background: #eaf2ff; color: #1557a8; }
 .badge-c { background: #fff2dc; color: #9a5811; }
-.card-page { float: right; margin: -23px 0 0; color: var(--muted); font-size: 11px; }
+.badge-catchup { background: #f0eaff; color: #6a3bb0; }
+.card-page { float: right; max-width: 58%; margin: -23px 0 0; color: var(--muted); font-size: 11px; text-align: right; overflow-wrap: anywhere; }
 .card-term { margin: 26px 0 20px; font-size: clamp(26px, 7vw, 42px); line-height: 1.25; letter-spacing: -0.05em; overflow-wrap: anywhere; }
 .card-prompt { padding: 20px; border-left: 4px solid var(--cyan); border-radius: 0 16px 16px 0; background: #f2f8fa; line-height: 1.75; white-space: pre-wrap; }
 .prompt-label { margin: 0 0 8px; color: var(--cyan); font-size: 11px; font-weight: 900; letter-spacing: 0.12em; text-transform: uppercase; }
@@ -247,7 +248,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .rating-3 { background: #edf7f3; color: #087653; border-color: #c7e7db; }
 .rating-4 { background: #edf4ff; color: #1557a8; border-color: #cbdcf5; }
 
-.filter-panel { display: grid; grid-template-columns: 2fr repeat(4, 1fr); gap: 9px; padding: 14px; border-radius: 18px; background: rgba(255, 255, 255, 0.8); border: 1px solid var(--line); }
+.filter-panel { display: grid; grid-template-columns: 2fr repeat(5, 1fr); gap: 9px; padding: 14px; border-radius: 18px; background: rgba(255, 255, 255, 0.8); border: 1px solid var(--line); }
 .filter-select { padding-right: 28px; background-image: linear-gradient(45deg, transparent 50%, #6b7a8d 50%), linear-gradient(135deg, #6b7a8d 50%, transparent 50%); background-position: calc(100% - 16px) 20px, calc(100% - 11px) 20px; background-size: 5px 5px; background-repeat: no-repeat; }
 .card-results { display: grid; gap: 9px; }
 .result-count { margin: 0 2px; color: var(--muted); font-size: 12px; font-weight: 800; }
@@ -263,6 +264,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
 .browse-answer + .browse-answer { margin-top: 8px; }
 .browse-answer strong { color: #28715c; font-size: 12px; }
 .browse-answer p { margin: 6px 0 0; line-height: 1.7; white-space: pre-wrap; }
+.related-cards { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.related-cards:empty { display: none; }
+.related-title { width: 100%; color: var(--muted); font-size: 11px; letter-spacing: 0.08em; }
+.related-button { max-width: 100%; height: auto; min-height: 34px; white-space: normal; text-align: left; }
 
 .settings-card { display: grid; gap: 10px; }
 .settings-card > .muted { margin: -6px 0 8px; }
@@ -294,7 +299,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, summary:focus-v
   .metric-label { font-size: 10px; }
   .metric-note { font-size: 9px; }
   .flashcard { min-height: calc(100dvh - 175px); padding: 22px 19px; border-radius: 22px; }
-  .card-term { margin-top: 22px; }
+  .card-page { float: none; max-width: none; margin: 10px 0 0; text-align: left; }
+  .card-term { margin-top: 14px; }
   .rating-grid { gap: 5px; }
   .rating { font-size: 11px; }
   .filter-panel { grid-template-columns: 1fr; }
