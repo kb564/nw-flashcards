@@ -1,5 +1,6 @@
 import { createEmptyCard } from "ts-fsrs";
 import { describe, expect, it } from "vitest";
+import { lockedImportModes } from "../src/import-policy";
 import { serializeFsrsCard } from "../src/types";
 import { normalizeDeckPayload, normalizeVaultPayload } from "../src/validation";
 
@@ -58,5 +59,12 @@ describe("v1 to v2 migration", () => {
 
   it("rejects unknown legacy fields before migration", () => {
     expect(() => normalizeDeckPayload({ ...legacyDeck(), unexpected: true })).toThrow("旧デッキ形式");
+  });
+});
+
+describe("locked import policy", () => {
+  it("requires unlocking before a deck update when an encrypted vault already exists", () => {
+    expect(lockedImportModes(true)).toEqual(["backup"]);
+    expect(lockedImportModes(false)).toEqual(["deck", "backup"]);
   });
 });

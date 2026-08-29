@@ -8,6 +8,7 @@ import {
   validatePassphrase,
 } from "./crypto";
 import { deleteVaultEnvelope, loadVaultEnvelope, saveVaultEnvelope } from "./storage";
+import { lockedImportModes } from "./import-policy";
 import {
   applyRating,
   buildStudyQueue,
@@ -134,7 +135,12 @@ function renderLocked(message?: string): void {
       ),
     );
   }
-  panel.append(importLauncher("暗号化デッキを取り込む", "deck"), importLauncher("バックアップから復元", "backup"));
+  if (storedEnvelope) {
+    panel.append(element("p", "field-help", "デッキを更新するには、先にロックを解除して設定画面から取り込んでください。復習履歴を安全に引き継げます。"));
+  }
+  for (const mode of lockedImportModes(storedEnvelope !== null)) {
+    panel.append(importLauncher(mode === "deck" ? "暗号化デッキを取り込む" : "バックアップから復元", mode));
+  }
   const privacy = element("div", "privacy-note");
   privacy.append(
     element("span", "privacy-dot"),
