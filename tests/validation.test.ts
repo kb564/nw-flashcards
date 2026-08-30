@@ -1,8 +1,10 @@
-import { createEmptyCard } from "ts-fsrs";
+import { createEmptyCard, Rating } from "ts-fsrs";
 import { describe, expect, it } from "vitest";
 import { lockedImportModes } from "../src/import-policy";
 import { serializeFsrsCard } from "../src/types";
 import { normalizeDeckPayload, normalizeVaultPayload } from "../src/validation";
+import { decryptPayload, encryptPayload, importPassphrase, parseEnvelopeText } from "../src/crypto";
+import { applyRating } from "../src/study";
 
 function legacyCard(index: number) {
   return {
@@ -31,6 +33,26 @@ function legacyDeck() {
 }
 
 describe("v1 to v2 migration", () => {
+  it("restores two independent encrypted backup generations with their histories and settings", async () => {
+    const material = await importPassphrase("public synthetic backup phrase");
+    const empty = normalizeVaultPayload({ schemaVersion: 1, deck: legacyDeck(), reviews: {}, orphanReviews: {},
+      settings: { newCardsPerDay: 10, requestRetention: 0.9, timezone: "Asia/Tokyo" } });
+    const first = applyRating(empty, empty.deck.cards[0]!.id, Rating.Good, new Date("2026-08-29T00:00:00Z"));
+    const second = applyRating(first, first.deck.cards[1]!.id, Rating.Hard, new Date("2026-08-30T00:00:00Z"));
+    const backups = [];
+    for (const generation of [first, second]) {
+      const backup = await encryptPayload("nwbackup", generation, material);
+      backups.push(backup);
+      const parsed = parseEnvelopeText(JSON.stringify(backup), "nwbackup");
+      const restored = normalizeVaultPayload(await decryptPayload(parsed, material, "nwbackup"));
+      expect(restored).toEqual(generation);
+    }
+    expect(backups[0]!.kdf.salt).not.toBe(backups[1]!.kdf.salt);
+    expect(backups[0]!.cipher.iv).not.toBe(backups[1]!.cipher.iv);
+    expect(Object.keys(first.reviews)).toHaveLength(1);
+    expect(Object.keys(second.reviews)).toHaveLength(2);
+  }, 20_000);
+
   it("preserves every textbook card id while adding the collection", () => {
     const old = legacyDeck();
     const migrated = normalizeDeckPayload(old);

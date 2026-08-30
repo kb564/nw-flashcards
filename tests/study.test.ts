@@ -2,6 +2,7 @@ import { Rating, createEmptyCard } from "ts-fsrs";
 import { describe, expect, it } from "vitest";
 import { applyRating, buildStudyQueue, filterCards, getStudyCounts, mergeDeck, tokyoDayKey } from "../src/study";
 import { serializeFsrsCard, type DeckPayload, type StudyCard, type VaultPayload } from "../src/types";
+import { normalizeDeckPayload } from '../src/validation';
 
 function makeCard(index: number): StudyCard {
   return {
@@ -43,6 +44,38 @@ function makeVault(): VaultPayload {
 }
 
 describe("study scheduling", () => {
+  it('accepts additional v2 textbook cards without changing legacy histories or settings', () => {
+    let vault = makeVault();
+    for (const [index, rating] of ([Rating.Again, Rating.Hard, Rating.Good, Rating.Easy] as const).entries()) {
+      vault = applyRating(vault, vault.deck.cards[index]!.id, rating, new Date('2026-08-29T00:00:00Z'));
+    }
+    const before = structuredClone(vault);
+    const newCards = Array.from({ length: 7 }, (_, index) => ({ ...makeCard(1000 + index), chapter: 2, page: '104' }));
+    const cards = [...vault.deck.cards.slice(0, 50), ...newCards, ...vault.deck.cards.slice(50)].map((card, order) => ({ ...card, order }));
+    const expanded = normalizeDeckPayload({ ...vault.deck, cards, cardCount: 566, sourceNoteCount: 558,
+      collections: [{ ...vault.deck.collections[0], cardCount: 566, sourceNoteCount: 558 }] });
+    const merged = mergeDeck(vault, expanded);
+    expect(merged.reviews).toEqual(before.reviews);
+    expect(merged.settings).toEqual(before.settings);
+    expect(merged.orphanReviews).toEqual(before.orphanReviews);
+    expect(vault).toEqual(before);
+    expect(newCards.every(card => merged.reviews[card.id] === undefined)).toBe(true);
+  });
+
+  it('restores an orphan review when the same ID reappears', () => {
+    const vault = makeVault();
+    const revived = makeCard(1000);
+    const state = { card: serializeFsrsCard(createEmptyCard(new Date('2026-08-29T00:00:00Z'))), firstReviewedAt: '2026-08-29T00:00:00Z', history: [] };
+    vault.orphanReviews[revived.id] = state;
+    const cards = [...vault.deck.cards, { ...revived, order: vault.deck.cards.length }];
+    const deck = normalizeDeckPayload({ ...vault.deck, cards, cardCount: 560, sourceNoteCount: 552,
+      collections: [{ ...vault.deck.collections[0], cardCount: 560, sourceNoteCount: 552 }] });
+    const merged = mergeDeck(vault, deck);
+    expect(merged.reviews[revived.id]).toEqual(state);
+    expect(merged.orphanReviews[revived.id]).toBeUndefined();
+    expect(vault.orphanReviews[revived.id]).toEqual(state);
+  });
+
   it("introduces ten cards in textbook order", () => {
     const vault = makeVault();
     const queue = buildStudyQueue(vault, new Date("2026-08-24T00:00:00.000Z"));

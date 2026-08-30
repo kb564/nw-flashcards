@@ -10,10 +10,11 @@
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
     "test:watch": "vitest",
-    "audit": "npm audit --omit=dev --audit-level=high",
+    "audit": "npm audit --audit-level=low",
     "deck:create": "node scripts/create-deck.mjs",
     "deck:check": "node scripts/create-deck.mjs --check",
-    "verify": "npm test && npm run build && npm run audit",
+    "boundary:check": "python3 ../scripts/check_public_boundary.py",
+    "verify": "npm run deck:check && npm test && npm run build && npm run audit && npm run boundary:check",
     "pages:prepare": "npm run verify && node scripts/prepare-pages.mjs"
   },
   "dependencies": {

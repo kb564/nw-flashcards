@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
+import { validateIdAliases, resolveIdAliases, partitionIdAliases } from './id-aliases.mjs';
 
 const CHAPTER_TITLES = new Map([
   [1, "基礎知識"], [2, "ネットワークインタフェース層"], [3, "インターネット層"],
@@ -33,6 +34,24 @@ function stableId(fileName, locator, term, kind, direction = "forward") {
   const normalized = term.normalize("NFKC").replace(/\s+/gu, " ").trim();
   const identity = [fileName, String(locator), normalized, kind, direction].join("|");
   return `nw-${createHash("sha256").update(identity, "utf8").digest("hex").slice(0, 24)}`;
+}
+
+export function sourceFingerprint(value) {
+  function canonical(item) {
+    if (Array.isArray(item)) return item.map(canonical);
+    if (item !== null && typeof item === 'object') {
+      return Object.fromEntries(Object.keys(item).sort().map(key => [key, canonical(item[key])]));
+    }
+    return item;
+  }
+  return createHash('sha256').update(JSON.stringify(canonical(value)), 'utf8').digest('hex');
+}
+
+export function assertReviewedNote(note, id, approvals) {
+  const approval = approvals.get(id);
+  if (approval?.['判定'] !== 'OK' || approval['内容指紋'] !== sourceFingerprint(note)) {
+    throw new Error('監査後にカード内容が変わったため、デッキを生成しません。');
+  }
 }
 
 function requireText(card, field) {
@@ -107,10 +126,18 @@ export async function buildDeckPayload(workspaceRoot) {
     cwd: workspaceRoot, encoding: "utf8", maxBuffer: 16 * 1024 * 1024,
   });
   if (checker.status !== 0) throw new Error("カードQAに失敗したため、デッキを生成しません。");
+  const audit = parseYaml(resolve(workspaceRoot, 'meta/qa-ledger.yaml'));
+  if (!audit['集計']['公開前未完了'] || Object.values(audit['集計']['公開前未完了']).some(count => count !== 0)) {
+    throw new Error('カードレビューが未完了のため、デッキを生成しません。');
+  }
+  const approvals = new Map(audit['カード判定'].map(row => [row['監査キー'], row]));
+  const identityBaseline = JSON.parse(await readFile(resolve(workspaceRoot, 'meta/card-id-baseline.json'), 'utf8'));
+  const aliases = validateIdAliases(JSON.parse(await readFile(resolve(workspaceRoot, 'meta/card-id-aliases.json'), 'utf8')), new Set([...identityBaseline.textbookIds, ...identityBaseline.catchupIds]));
+  const scopedAliases = partitionIdAliases(aliases, identityBaseline);
 
   let textbookNoteCount = 0;
   let order = 0;
-  const textbookCards = [];
+  let textbookCards = [];
   for (const fileName of fileNames) {
     const chapter = Number(fileName.slice(0, 2));
     const chapterTitle = CHAPTER_TITLES.get(chapter);
@@ -127,11 +154,16 @@ export async function buildDeckPayload(workspaceRoot) {
         collectionId: "textbook-r06", sourceLabel: "令和6年版教科書",
         sourceLocator: `紙面 p.${page}`, relatedCardIds: [],
       });
+      assertReviewedNote(note, scopedAliases.textbook.get(transformed[0].id) ?? transformed[0].id, approvals);
       textbookCards.push(...transformed);
       order += transformed.length;
     }
   }
-  if (textbookNoteCount !== 551 || textbookCards.length !== 559) throw new Error("既存カード件数が期待値と一致しません。");
+  textbookCards = resolveIdAliases(textbookCards, scopedAliases.textbook);
+  // Release QA supplies current counts. Historical 551/559 are only v1 migration constants.
+  if (textbookNoteCount !== audit['集計']['教科書ノート'] || textbookCards.length !== audit['集計']['教科書学習カード']) {
+    throw new Error('カード件数が検証済み原資料台帳と一致しません。');
+  }
 
   const anchorByTermPage = new Map();
   for (const card of textbookCards.filter((item) => item.direction !== "reverse")) {
@@ -142,7 +174,7 @@ export async function buildDeckPayload(workspaceRoot) {
 
   const supplementalNames = (await readdir(supplementalDir)).filter((name) => name.endsWith(".yaml")).sort();
   let supplementalNoteCount = 0;
-  const supplementalCards = [];
+  let supplementalCards = [];
   for (const fileName of supplementalNames) {
     await readFile(resolve(supplementalDir, fileName), "utf8");
     const notes = parseYaml(resolve(supplementalDir, fileName));
@@ -161,11 +193,13 @@ export async function buildDeckPayload(workspaceRoot) {
         collectionId: "catchup", sourceLabel: firstSource["名称"], sourceLocator: firstSource["位置"],
         primaryRelatedCardId: primary.id, relatedCardIds,
       });
+      assertReviewedNote(note, scopedAliases.catchup.get(transformed[0].id) ?? transformed[0].id, approvals);
       supplementalCards.push(...transformed);
       order += transformed.length;
     }
   }
 
+  supplementalCards = resolveIdAliases(supplementalCards, scopedAliases.catchup);
   const supplementIdsByTextbook = new Map();
   for (const supplement of supplementalCards) {
     for (const relatedId of supplement.relatedCardIds) {
@@ -188,6 +222,13 @@ export async function buildDeckPayload(workspaceRoot) {
   if (ids.size !== cards.length || cards.length !== textbookCards.length + supplementalCards.length) {
     throw new Error("安定カードIDが重複しています。");
   }
+  const baseline = JSON.parse(await readFile(resolve(workspaceRoot, 'meta/card-id-baseline.json'), 'utf8'));
+  const legacyIds = new Set(baseline.textbookIds);
+  const retainedIds = textbookCards.filter(card => legacyIds.has(card.id)).map(card => card.id);
+  if (JSON.stringify(retainedIds) !== JSON.stringify(baseline.textbookIds) || baseline.catchupIds.some(id => !ids.has(id))) {
+    throw new Error('既存IDの欠落または相対順序変更を検出しました。');
+  }
+  if (cards.length !== audit['集計']['合計学習カード']) throw new Error('全コレクション件数が検証済み台帳と一致しません。');
   return {
     schemaVersion: 2,
     deckId: "nw-r06",

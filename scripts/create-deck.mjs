@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { webcrypto } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { timingSafeEqual, webcrypto } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildDeckPayload } from "./deck-core.mjs";
@@ -36,24 +36,29 @@ async function hiddenPrompt(prompt) {
       process.stdin.removeListener("data", onData);
       process.stdout.write("\n");
     };
-    const onData = (character) => {
-      if (character === "\u0003") {
-        finish();
-        rejectPrompt(new Error("中断しました。"));
-      } else if (character === "\r" || character === "\n") {
-        finish();
-        resolvePrompt(value);
-      } else if (character === "\u007f") {
-        value = value.slice(0, -1);
-      } else if (/^[^\u0000-\u001f]$/u.test(character)) {
-        value += character;
+    const onData = (chunk) => {
+      // A password-manager paste arrives as one chunk; never echo any part.
+      for (const character of chunk) {
+        if (character === "\u0003" || character === "\u0004") {
+          finish();
+          rejectPrompt(new Error("中断しました。"));
+          return;
+        } else if (character === "\r" || character === "\n") {
+          finish();
+          resolvePrompt(value);
+          return;
+        } else if (character === "\u007f" || character === "\b") {
+          value = [...value].slice(0, -1).join("");
+        } else if (/^[^\u0000-\u001f]$/u.test(character)) {
+          value += character;
+        }
       }
     };
     process.stdin.on("data", onData);
   });
 }
 
-async function encryptDeck(deck, passphrase) {
+export async function encryptDeck(deck, passphrase) {
   const salt = webcrypto.getRandomValues(new Uint8Array(16));
   const iv = webcrypto.getRandomValues(new Uint8Array(12));
   const material = await webcrypto.subtle.importKey("raw", encoder.encode(passphrase), "PBKDF2", false, ["deriveKey"]);
@@ -62,7 +67,7 @@ async function encryptDeck(deck, passphrase) {
     material,
     { name: "AES-GCM", length: 256 },
     false,
-    ["encrypt"],
+    ["encrypt", "decrypt"],
   );
   const header = {
     format: "nwdeck",
@@ -81,9 +86,19 @@ async function encryptDeck(deck, passphrase) {
     header.cipher.iv,
   ].join("|"));
   const plaintext = encoder.encode(JSON.stringify(deck));
-  const encrypted = await webcrypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: aad, tagLength: 128 }, key, plaintext);
-  plaintext.fill(0);
-  return { ...header, ciphertext: base64(new Uint8Array(encrypted)) };
+  let restored;
+  try {
+    const parameters = { name: "AES-GCM", iv, additionalData: aad, tagLength: 128 };
+    const encrypted = await webcrypto.subtle.encrypt(parameters, key, plaintext);
+    restored = new Uint8Array(await webcrypto.subtle.decrypt(parameters, key, encrypted));
+    if (restored.length !== plaintext.length || !timingSafeEqual(restored, plaintext)) {
+      throw new Error("暗号化後の復号検証に失敗しました。");
+    }
+    return { ...header, ciphertext: base64(new Uint8Array(encrypted)) };
+  } finally {
+    plaintext.fill(0);
+    restored?.fill(0);
+  }
 }
 
 async function main() {
@@ -100,20 +115,30 @@ async function main() {
     );
     return;
   }
-  const first = await hiddenPrompt("新しいパスフレーズ: ");
-  validatePassphrase(first);
-  const second = await hiddenPrompt("もう一度入力: ");
-  if (first !== second) throw new Error("2回のパスフレーズが一致しません。");
-  const envelope = await encryptDeck(deck, first);
+  let first = "";
+  let second = "";
+  let envelope;
+  try {
+    first = await hiddenPrompt("新しいパスフレーズ（12文字以上、または4単語以上）: ");
+    validatePassphrase(first);
+    second = await hiddenPrompt("もう一度入力: ");
+    if (first !== second) throw new Error("2回のパスフレーズが一致しません。");
+    envelope = await encryptDeck(deck, first);
+  } finally {
+    first = "";
+    second = "";
+  }
   const outputDir = resolve(workspaceRoot, "private-output");
   await mkdir(outputDir, { recursive: true, mode: 0o700 });
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const output = resolve(outputDir, `ネスペ暗記カード-R06-${stamp}.nwdeck`);
-  await writeFile(output, `${JSON.stringify(envelope)}\n`, { mode: 0o600, flag: "wx" });
-  process.stdout.write(`暗号化デッキを作成しました: ${basename(output)}\n保存先: ${outputDir}\n`);
+  const serialized = `${JSON.stringify(envelope)}\n`;
+  await writeFile(output, serialized, { mode: 0o600, flag: "wx" });
+  if (await readFile(output, "utf8") !== serialized) throw new Error("書込み後のファイル照合に失敗しました。新規ファイルは使用しないでください。");
+  process.stdout.write(`暗号化・復号・書込み照合: OK\n学習カード: ${deck.cardCount}\n暗号化デッキを作成しました: ${basename(output)}\n保存先: ${outputDir}\n`);
 }
 
-main().catch((error) => {
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch((error) => {
   process.stderr.write(`生成を停止しました: ${error instanceof Error ? error.message : "不明なエラー"}\n`);
   process.exitCode = 1;
 });
